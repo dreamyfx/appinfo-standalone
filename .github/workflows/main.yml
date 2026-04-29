@@ -1,0 +1,30 @@
+name: Build UACME
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compile uacme
+        shell: cmd
+        run: |
+          cl /EHsc uacme.c /link user32.lib advapi32.lib shell32.lib /out:uacme.exe
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uacme-executable
+          path: uacme.exe
