@@ -21,7 +21,7 @@ jobs:
       - name: Compile uacme
         shell: cmd
         run: |
-          cl /EHsc uacme.c /link user32.lib advapi32.lib shell32.lib /out:uacme.exe
+          cl /EHsc working-appinfo-uac.c /link user32.lib advapi32.lib shell32.lib /out:uacme.exe
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
